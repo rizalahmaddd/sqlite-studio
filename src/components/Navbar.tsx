@@ -2,7 +2,6 @@ import React, { useState } from 'react';
 import { 
   Database, 
   FolderOpen, 
-  Download, 
   Save, 
   ShieldCheck, 
   ShieldAlert, 
@@ -154,7 +153,7 @@ export const Navbar: React.FC<NavbarProps> = ({
             title={safeMode ? "Safe Mode Aktif" : "Safe Mode Nonaktif"}
           >
             {safeMode ? <ShieldCheck size={14} color="#10b981" /> : <ShieldAlert size={14} color="#ef4444" />}
-            <span style={{ fontSize: '11.5px' }}>{safeMode ? 'Safe ON' : 'Safe OFF'}</span>
+            <span style={{ fontSize: '11.5px' }} className="hide-on-compact">{safeMode ? 'Safe ON' : 'Safe OFF'}</span>
           </button>
 
           {activeDb && (
@@ -164,7 +163,7 @@ export const Navbar: React.FC<NavbarProps> = ({
               title="Import Data (CSV/JSON)"
             >
               <Upload size={13} color="var(--accent-light)" />
-              <span>Import</span>
+              <span className="hide-on-compact">Import</span>
             </button>
           )}
 
@@ -174,7 +173,7 @@ export const Navbar: React.FC<NavbarProps> = ({
             title="Buka Database Sampel E-Commerce"
           >
             <Sparkles size={14} color="#a855f7" />
-            <span>Demo DB</span>
+            <span className="hide-on-compact">Demo DB</span>
           </button>
 
           <button
@@ -183,17 +182,36 @@ export const Navbar: React.FC<NavbarProps> = ({
             title="Buka Database SQLite dari Komputer"
           >
             <FolderOpen size={14} />
-            <span>Open DB</span>
+            <span className="hide-on-compact">Open DB</span>
           </button>
 
           {activeDb && (
             <button
-              className="btn btn-sm btn-primary"
+              className={`btn btn-sm ${activeDb.isDirty ? 'btn-primary' : 'btn-secondary'}`}
               onClick={onSaveOrExport}
-              title="Simpan atau Download file database"
+              title={activeDb.syncMode === 'direct' ? "Simpan langsung ke file di komputer (Cmd/Ctrl + S)" : "Simpan & unduh file database .db (Cmd/Ctrl + S)"}
+              style={{
+                boxShadow: activeDb.isDirty ? '0 0 14px rgba(99, 102, 241, 0.55)' : undefined,
+                fontWeight: 600,
+                border: activeDb.isDirty ? '1px solid var(--accent-light)' : undefined
+              }}
             >
-              {activeDb.syncMode === 'direct' ? <Save size={14} /> : <Download size={14} />}
-              <span>{activeDb.syncMode === 'direct' ? 'Save' : 'Export'}</span>
+              <Save size={14} color={activeDb.isDirty ? '#fff' : 'var(--accent-light)'} />
+              <span>{activeDb.isDirty ? 'Simpan' : activeDb.syncMode === 'direct' ? 'Save' : 'Save .db'}</span>
+              <kbd 
+                className="hide-on-compact"
+                style={{
+                  fontSize: '10px',
+                  padding: '1px 5px',
+                  borderRadius: '3px',
+                  background: activeDb.isDirty ? 'rgba(255, 255, 255, 0.22)' : 'var(--bg-surface-elevated)',
+                  color: activeDb.isDirty ? '#fff' : 'var(--text-muted)',
+                  marginLeft: '2px',
+                  border: '1px solid rgba(255, 255, 255, 0.15)'
+                }}
+              >
+                ⌘S
+              </kbd>
             </button>
           )}
 
@@ -245,8 +263,8 @@ export const Navbar: React.FC<NavbarProps> = ({
                     onSaveOrExport();
                   }}
                 >
-                  {activeDb.syncMode === 'direct' ? <Save size={13} /> : <Download size={13} />}
-                  <span>{activeDb.syncMode === 'direct' ? 'Save to Disk' : 'Export .db'}</span>
+                  <Save size={13} />
+                  <span>{activeDb.syncMode === 'direct' ? 'Save to Disk' : 'Simpan .db'}</span>
                 </button>
               )}
 
@@ -287,6 +305,32 @@ export const Navbar: React.FC<NavbarProps> = ({
                   <span>Import CSV / JSON</span>
                 </button>
               )}
+
+              {activeDb && (
+                <button
+                  className="btn btn-sm btn-outline"
+                  style={{ width: '100%', justifyContent: 'flex-start' }}
+                  onClick={() => {
+                    setMobileMenuOpen(false);
+                    onViewChange('diff');
+                  }}
+                >
+                  <GitCompare size={13} color="var(--accent-light)" />
+                  <span>Komparasi (Diff) DB</span>
+                </button>
+              )}
+
+              <button
+                className="btn btn-sm btn-outline"
+                style={{ width: '100%', justifyContent: 'flex-start' }}
+                onClick={() => {
+                  setMobileMenuOpen(false);
+                  onOpenShortcutsModal();
+                }}
+              >
+                <Keyboard size={13} />
+                <span>Pintasan Keyboard</span>
+              </button>
 
               <div style={{ height: '1px', background: 'var(--border-subtle)', margin: '4px 0' }} />
 

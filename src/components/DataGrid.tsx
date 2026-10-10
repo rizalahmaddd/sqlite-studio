@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { 
   Plus, 
   Trash2, 
@@ -129,34 +129,17 @@ export const DataGrid: React.FC<DataGridProps> = ({
     }
   }, [dbId, table.name, table.columns, table.primaryKeys, searchQuery, sortColumn, sortOrder, page, pageSize, hasNoExplicitPk]);
 
-  const prevDepsRef = useRef({ dbId, tableName: table.name, searchQuery, sortColumn, sortOrder, pageSize });
-
   useEffect(() => {
-    const prev = prevDepsRef.current;
-    const filterChanged =
-      prev.dbId !== dbId ||
-      prev.tableName !== table.name ||
-      prev.searchQuery !== searchQuery ||
-      prev.sortColumn !== sortColumn ||
-      prev.sortOrder !== sortOrder ||
-      prev.pageSize !== pageSize;
-
-    if (filterChanged) {
-      prevDepsRef.current = { dbId, tableName: table.name, searchQuery, sortColumn, sortOrder, pageSize };
-      setSelectedRowIndices(new Set());
-      setEditingCell(null);
-      if (page !== 1) {
-        setPage(1);
-        return;
-      }
-    }
-
+    // oxlint-disable-next-line react/set-state-in-effect
     loadTableData();
-  }, [dbId, table.name, searchQuery, sortColumn, sortOrder, pageSize, page, loadTableData]);
+  }, [loadTableData]);
 
   // Handle Sort
   const handleSort = (colName: string) => {
     if (colName === '__studio_rowid__') return;
+    setPage(1);
+    setSelectedRowIndices(new Set());
+    setEditingCell(null);
     if (sortColumn === colName) {
       if (sortOrder === 'ASC') {
         setSortOrder('DESC');
@@ -326,7 +309,12 @@ export const DataGrid: React.FC<DataGridProps> = ({
               className="input-field search-input"
               placeholder={`Cari di ${table.name}...`}
               value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
+              onChange={(e) => {
+                setSearchQuery(e.target.value);
+                setPage(1);
+                setSelectedRowIndices(new Set());
+                setEditingCell(null);
+              }}
             />
           </div>
 

@@ -947,11 +947,170 @@ input[type="time"]::-webkit-calendar-picker-indicator:hover {
 }
 
 
+/* Medium/Compact Screen Optimizations (769px - 1180px) */
+@media (max-width: 1180px) {
+  .hide-on-compact {
+    display: none !important;
+  }
+}
+
+/* Bottom Navigation (Desktop Hidden) */
+.bottom-nav {
+  display: none;
+}
+
+/* Sidebar Search and Actions */
+.sidebar-search-box {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  background-color: var(--bg-input);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  margin: 6px 12px;
+  transition: border-color var(--transition-fast);
+}
+
+.sidebar-search-box:focus-within {
+  border-color: var(--accent-primary);
+  box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.2);
+}
+
+.sidebar-search-input {
+  background: transparent;
+  border: none;
+  outline: none;
+  font-size: 12px;
+  color: var(--text-primary);
+  width: 100%;
+}
+
+.sidebar-menu-dropdown {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  margin-top: 4px;
+  background-color: var(--bg-surface-elevated);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg), 0 8px 24px rgba(0, 0, 0, 0.45);
+  padding: 4px;
+  z-index: 1050;
+  min-width: 180px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  animation: scaleIn 140ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.sidebar-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  border: none;
+  font-size: 12px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  width: 100%;
+  text-align: left;
+  transition: all 120ms ease;
+}
+
+.sidebar-menu-item:hover {
+  background-color: var(--bg-surface);
+  color: var(--text-primary);
+}
+
+.sidebar-menu-item.danger {
+  color: var(--danger);
+}
+
+.sidebar-menu-item.danger:hover {
+  background-color: rgba(239, 68, 68, 0.15);
+}
+
 /* ==========================================================================
    Mobile & Tablet Screen Optimizations (< 768px)
    Drawer Navigation | Horizontal Touch Tabs | Sheet Modals | Touch Targets
    ========================================================================== */
 @media (max-width: 768px) {
+  /* Native Mobile Bottom Navigation Bar */
+  .bottom-nav {
+    display: flex;
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: calc(58px + env(safe-area-inset-bottom, 0px));
+    background: rgba(11, 15, 26, 0.94);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border-top: 1px solid var(--border-default);
+    z-index: 900;
+    padding: 0 4px;
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+    justify-content: space-around;
+    align-items: center;
+    box-shadow: 0 -8px 24px rgba(0, 0, 0, 0.5);
+  }
+
+  .bottom-nav-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    flex: 1;
+    height: 100%;
+    background: transparent;
+    border: none;
+    color: var(--text-muted);
+    font-size: 10px;
+    gap: 3px;
+    cursor: pointer;
+    transition: all 160ms cubic-bezier(0.16, 1, 0.3, 1);
+    position: relative;
+    padding: 6px 2px;
+    touch-action: manipulation;
+  }
+
+  .bottom-nav-item:active {
+    transform: scale(0.92);
+  }
+
+  .bottom-nav-item.active {
+    color: var(--accent-light);
+    font-weight: 600;
+  }
+
+  .bottom-nav-item.active .bottom-nav-icon-wrap {
+    background: rgba(99, 102, 241, 0.2);
+    color: var(--accent-light);
+    border-radius: 12px;
+  }
+
+  .bottom-nav-icon-wrap {
+    width: 32px;
+    height: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 160ms ease;
+  }
+
+  /* Leave room for sticky bottom nav on mobile */
+  .main-workspace {
+    padding-bottom: calc(66px + env(safe-area-inset-bottom, 0px)) !important;
+  }
+
+  /* Hide the top navbar view-tabs on mobile as they are now in the bottom nav */
+  .navbar-view-tabs {
+    display: none !important;
+  }
+
   .mobile-only-btn {
     display: inline-flex !important;
   }

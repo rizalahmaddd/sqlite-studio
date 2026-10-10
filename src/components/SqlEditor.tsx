@@ -133,7 +133,13 @@ const DEFAULT_SNIPPETS: CustomSnippet[] = [
       });
 
       if (!res.error) {
-        onQuerySuccess();
+        const isMutating = Boolean(
+          (res.rowsAffected !== undefined && res.rowsAffected > 0) ||
+          /^\s*(INSERT|UPDATE|DELETE|REPLACE|CREATE|DROP|ALTER|VACUUM|REINDEX|PRAGMA\s+wal_checkpoint)\b/i.test(sqlToRun)
+        );
+        if (isMutating) {
+          onQuerySuccess();
+        }
       }
     } finally {
       setIsRunning(false);

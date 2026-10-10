@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Navbar } from './components/Navbar';
 import { Sidebar } from './components/Sidebar';
 import { DataGrid } from './components/DataGrid';
@@ -12,6 +12,7 @@ import { SafeModeModal } from './components/SafeModeModal';
 import { WalWarningModal } from './components/WalWarningModal';
 import { ImportModal } from './components/ImportModal';
 import { ShortcutsModal } from './components/ShortcutsModal';
+import { BottomNav } from './components/BottomNav';
 
 import type { DatabaseMetadata, ActiveView, ColumnInfo, SafeGuardAlert } from './types/database';
 import { 
@@ -21,16 +22,24 @@ import {
   exportDatabaseBinary, 
   isWalMode,
   validateSqliteHeader,
-  executeRawQuery
+  executeRawQuery,
+  exportDatabaseSqlDump,
+  cloneDatabase
 } from './services/sqliteEngine';
 import { 
   openFileWithHandle, 
   writeBackToDisk, 
-  triggerFileDownload 
+  triggerFileDownload,
+  triggerTextDownload
 } from './services/fileSystemSync';
 import { createSampleEcommerceDb } from './services/sampleData';
 import { Database, FolderOpen, Sparkles, Upload, TableProperties, Terminal } from 'lucide-react';
 import { useFeedback } from './context/useFeedback';
+import { 
+  persistDatabaseToStorage, 
+  removeDatabaseFromStorage, 
+  loadAllPersistedDatabases 
+} from './services/dbStorage';
 
 export const App: React.FC = () => {
   const { showToast, confirm } = useFeedback();
@@ -72,12 +81,17 @@ export const App: React.FC = () => {
   const activeDb = databases.find(d => d.id === activeDbId) || null;
   const currentTableSchema = activeDb?.tables.find(t => t.name === selectedTable) || activeDb?.tables[0] || null;
 
-  // Global Keyboard Shortcuts (Cmd/Ctrl + K)
+  const handleSaveRef = useRef<((id?: string) => Promise<void>) | null>(null);
+
+  // Global Keyboard Shortcuts (Cmd/Ctrl + K, Cmd/Ctrl + S)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
         e.preventDefault();
         setIsShortcutsModalOpen(prev => !prev);
+      } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 's') {
+        e.preventDefault();
+        handleSaveRef.current?.();
       }
     };
     window.addEventListener('keydown', handleKeyDown);
@@ -101,11 +115,26 @@ export const App: React.FC = () => {
       e.preventDefault();
       setIsDragOver(false);
 
+      const items = e.dataTransfer?.items;
       const files = e.dataTransfer?.files;
       if (!files || files.length === 0) return;
 
       for (let i = 0; i < files.length; i++) {
         const file = files[i];
+        let handle: FileSystemFileHandle | undefined = undefined;
+
+        // Try getting FileSystemFileHandle from DataTransferItem (Chromium File System Access API)
+        if (items && items[i] && typeof (items[i] as any).getAsFileSystemHandle === 'function') {
+          try {
+            const fsHandle = await (items[i] as any).getAsFileSystemHandle();
+            if (fsHandle && fsHandle.kind === 'file') {
+              handle = fsHandle as FileSystemFileHandle;
+            }
+          } catch (err) {
+            console.warn('Could not acquire handle from dropped file:', err);
+          }
+        }
+
         try {
           const arrayBuffer = await file.arrayBuffer();
           const buffer = new Uint8Array(arrayBuffer);
@@ -128,11 +157,25 @@ export const App: React.FC = () => {
             sizeBytes: buffer.length,
             tables,
             isDirty: false,
-            syncMode: 'sandbox',
+            syncMode: handle ? 'direct' : 'sandbox',
+            fileHandle: handle,
             walDetected: walFlag,
             companionFiles: { wal: false, shm: false },
             lastModified: file.lastModified || Date.now()
           };
+
+          // Persist to IndexedDB so it survives page reload
+          persistDatabaseToStorage({
+            id: dbId,
+            name: file.name,
+            sizeBytes: buffer.length,
+            buffer,
+            syncMode: handle ? 'direct' : 'sandbox',
+            fileHandle: handle,
+            isDirty: false,
+            walDetected: walFlag,
+            lastModified: file.lastModified || Date.now()
+          });
 
           setDatabases(prev => [newDbMeta, ...prev]);
           setActiveDbId(dbId);
@@ -177,7 +220,20 @@ export const App: React.FC = () => {
   const loadDemoDatabase = useCallback(async () => {
     try {
       const demoDb = await createSampleEcommerceDb();
-      setDatabases(prev => [demoDb, ...prev.filter(d => d.name !== demoDb.name)]);
+      const binary = exportDatabaseBinary(demoDb.id);
+      persistDatabaseToStorage({
+        id: demoDb.id,
+        name: demoDb.name,
+        alias: demoDb.alias,
+        sizeBytes: binary.length,
+        buffer: binary,
+        syncMode: 'sandbox',
+        fileHandle: undefined,
+        isDirty: false,
+        walDetected: false,
+        lastModified: Date.now()
+      });
+      setDatabases(prev => [demoDb, ...prev.filter(d => d.id !== demoDb.id)]);
       setActiveDbId(demoDb.id);
       setSelectedTable(demoDb.tables[0]?.name || null);
       setActiveView('grid');
@@ -186,10 +242,92 @@ export const App: React.FC = () => {
     }
   }, []);
 
-  // Load sample on first visit if workspace is empty
+  // Restore workspace from IndexedDB on startup (survives reload)
   useEffect(() => {
-    loadDemoDatabase();
+    let isMounted = true;
+
+    async function restoreWorkspace() {
+      try {
+        const persisted = await loadAllPersistedDatabases();
+        if (!isMounted) return;
+
+        if (persisted.length > 0) {
+          const restoredDbs: DatabaseMetadata[] = [];
+
+          for (const rec of persisted) {
+            let buffer = rec.buffer;
+            const handle = rec.fileHandle;
+            const syncMode = rec.syncMode;
+
+            // If direct handle exists, attempt to re-read latest file from disk if permission is granted
+            if (handle && typeof (handle as any).queryPermission === 'function') {
+              try {
+                const perm = await (handle as any).queryPermission({ mode: 'read' });
+                if (perm === 'granted') {
+                  const file = await handle.getFile();
+                  const ab = await file.arrayBuffer();
+                  buffer = new Uint8Array(ab);
+                }
+              } catch (err) {
+                console.warn('Could not read from stored handle, using cached buffer', err);
+              }
+            }
+
+            await loadDatabase(rec.id, buffer);
+            const tables = inspectSchema(rec.id);
+
+            restoredDbs.push({
+              id: rec.id,
+              name: rec.name,
+              alias: rec.alias,
+              sizeBytes: buffer.length,
+              tables,
+              isDirty: rec.isDirty,
+              syncMode,
+              fileHandle: handle,
+              walDetected: rec.walDetected || isWalMode(buffer),
+              companionFiles: { wal: false, shm: false },
+              lastModified: rec.lastModified
+            });
+          }
+
+          if (restoredDbs.length > 0 && isMounted) {
+            setDatabases(restoredDbs);
+            const savedActiveId = localStorage.getItem('sqlite_studio_active_db');
+            const targetDb = (savedActiveId && restoredDbs.find(d => d.id === savedActiveId)) || restoredDbs[0];
+            setActiveDbId(targetDb.id);
+            const savedTable = localStorage.getItem('sqlite_studio_active_table');
+            const tableExists = savedTable && targetDb.tables.some(t => t.name === savedTable);
+            setSelectedTable(tableExists ? savedTable : (targetDb.tables[0]?.name || null));
+            return;
+          }
+        }
+      } catch (err) {
+        console.warn('Failed to restore workspace from IndexedDB:', err);
+      }
+
+      // Fallback: If workspace is empty, load demo database
+      if (isMounted) {
+        loadDemoDatabase();
+      }
+    }
+
+    restoreWorkspace();
+    return () => { isMounted = false; };
   }, [loadDemoDatabase]);
+
+  // Keep active database and selected table in localStorage so reloads restore exact view
+  useEffect(() => {
+    if (activeDbId) {
+      localStorage.setItem('sqlite_studio_active_db', activeDbId);
+    }
+  }, [activeDbId]);
+
+  useEffect(() => {
+    if (selectedTable) {
+      localStorage.setItem('sqlite_studio_active_table', selectedTable);
+    }
+  }, [selectedTable]);
 
   const handleOpenFiles = async () => {
     try {
@@ -222,6 +360,19 @@ export const App: React.FC = () => {
         lastModified: picked.file.lastModified || Date.now()
       };
 
+      // Persist to IndexedDB
+      persistDatabaseToStorage({
+        id: dbId,
+        name: picked.file.name,
+        sizeBytes: picked.buffer.length,
+        buffer: picked.buffer,
+        syncMode: picked.handle ? 'direct' : 'sandbox',
+        fileHandle: picked.handle,
+        isDirty: false,
+        walDetected: walFlag,
+        lastModified: picked.file.lastModified || Date.now()
+      });
+
       setDatabases(prev => [newDbMeta, ...prev]);
       setActiveDbId(dbId);
       setSelectedTable(tables[0]?.name || null);
@@ -237,33 +388,76 @@ export const App: React.FC = () => {
     }
   };
 
-  const handleSaveOrExport = async () => {
-    if (!activeDb) return;
+  const handleSaveOrExport = async (targetDbId?: string) => {
+    const dbToSave = targetDbId ? (databases.find(d => d.id === targetDbId) || activeDb) : activeDb;
+    if (!dbToSave) return;
 
     try {
-      const binary = exportDatabaseBinary(activeDb.id);
+      const binary = exportDatabaseBinary(dbToSave.id);
+      const effectiveName = dbToSave.alias || dbToSave.name;
+      const downloadFileName = effectiveName.includes('.') ? effectiveName : `${effectiveName}.db`;
 
-      if (activeDb.syncMode === 'direct' && activeDb.fileHandle) {
-        const success = await writeBackToDisk(activeDb.fileHandle, binary);
+      if (dbToSave.syncMode === 'direct' && dbToSave.fileHandle) {
+        const success = await writeBackToDisk(dbToSave.fileHandle, binary);
         if (success) {
-          setDatabases(prev => prev.map(db => db.id === activeDb.id ? { ...db, isDirty: false, sizeBytes: binary.length } : db));
-          showToast('success', `Perubahan berhasil disimpan langsung ke file "${activeDb.name}" di komputer Anda!`);
+          setDatabases(prev => prev.map(db => db.id === dbToSave.id ? { ...db, isDirty: false, sizeBytes: binary.length } : db));
+          persistDatabaseToStorage({
+            id: dbToSave.id,
+            name: dbToSave.name,
+            alias: dbToSave.alias,
+            sizeBytes: binary.length,
+            buffer: binary,
+            syncMode: 'direct',
+            fileHandle: dbToSave.fileHandle,
+            isDirty: false,
+            walDetected: dbToSave.walDetected,
+            lastModified: Date.now()
+          });
+          showToast('success', `Perubahan berhasil disimpan langsung ke file "${dbToSave.name}" di komputer Anda!`);
         } else {
           // Fallback to download
-          triggerFileDownload(binary, activeDb.name);
-          setDatabases(prev => prev.map(db => db.id === activeDb.id ? { ...db, isDirty: false } : db));
-          showToast('info', `File database berhasil didownload: ${activeDb.name}`);
+          triggerFileDownload(binary, downloadFileName);
+          setDatabases(prev => prev.map(db => db.id === dbToSave.id ? { ...db, isDirty: false } : db));
+          persistDatabaseToStorage({
+            id: dbToSave.id,
+            name: dbToSave.name,
+            alias: dbToSave.alias,
+            sizeBytes: binary.length,
+            buffer: binary,
+            syncMode: dbToSave.syncMode,
+            fileHandle: dbToSave.fileHandle,
+            isDirty: false,
+            walDetected: dbToSave.walDetected,
+            lastModified: Date.now()
+          });
+          showToast('info', `File database berhasil didownload: ${downloadFileName}`);
         }
       } else {
-        triggerFileDownload(binary, activeDb.name);
-        setDatabases(prev => prev.map(db => db.id === activeDb.id ? { ...db, isDirty: false } : db));
-        showToast('info', `File database berhasil didownload: ${activeDb.name}`);
+        triggerFileDownload(binary, downloadFileName);
+        setDatabases(prev => prev.map(db => db.id === dbToSave.id ? { ...db, isDirty: false } : db));
+        persistDatabaseToStorage({
+          id: dbToSave.id,
+          name: dbToSave.name,
+          alias: dbToSave.alias,
+          sizeBytes: binary.length,
+          buffer: binary,
+          syncMode: dbToSave.syncMode,
+          fileHandle: dbToSave.fileHandle,
+          isDirty: false,
+          walDetected: dbToSave.walDetected,
+          lastModified: Date.now()
+        });
+        showToast('success', `Database berhasil disimpan & diunduh sebagai file "${downloadFileName}".`);
       }
     } catch (err) {
       console.error('Failed to save or export database:', err);
       showToast('error', 'Gagal menyimpan database.');
     }
   };
+
+  useEffect(() => {
+    handleSaveRef.current = handleSaveOrExport;
+  });
 
   const handleSelectDb = (id: string) => {
     setActiveDbId(id);
@@ -280,21 +474,34 @@ export const App: React.FC = () => {
 
   const handleCloseDb = async (id: string) => {
     const dbToClose = databases.find(d => d.id === id);
-    if (dbToClose && dbToClose.isDirty) {
+    if (!dbToClose) return;
+
+    if (dbToClose.isDirty) {
+      const ok = await confirm({
+        title: 'Tutup Database (Belum Disimpan)',
+        message: `Database "${dbToClose.alias || dbToClose.name}" memiliki perubahan yang belum disimpan! Jika ditutup sekarang, perubahan sesi ini tidak akan tersimpan. Tetap ingin menutup database ini?`,
+        confirmText: 'Tetap Tutup',
+        cancelText: 'Batal',
+        type: 'danger'
+      });
+      if (!ok) return;
+    } else {
       const ok = await confirm({
         title: 'Tutup Database',
-        message: `Database "${dbToClose.name}" memiliki perubahan yang belum disimpan. Tetap ingin menutup database ini?`,
-        confirmText: 'Tetap Tutup',
+        message: `Tutup database "${dbToClose.alias || dbToClose.name}" dari workspace? (File fisik asli di komputer Anda tetap aman dan tidak akan terhapus).`,
+        confirmText: 'Tutup Database',
         cancelText: 'Batal',
         type: 'warning'
       });
-      if (!ok) {
-        return;
-      }
+      if (!ok) return;
     }
+
     closeDatabase(id);
+    removeDatabaseFromStorage(id);
     const updated = databases.filter(d => d.id !== id);
     setDatabases(updated);
+    showToast('info', `Database "${dbToClose.alias || dbToClose.name}" telah ditutup dari workspace.`);
+
     if (activeDbId === id) {
       if (updated.length > 0) {
         setActiveDbId(updated[0].id);
@@ -302,7 +509,109 @@ export const App: React.FC = () => {
       } else {
         setActiveDbId(null);
         setSelectedTable(null);
+        localStorage.removeItem('sqlite_studio_active_db');
+        localStorage.removeItem('sqlite_studio_active_table');
       }
+    }
+  };
+
+  const handleRenameDb = (id: string, newAlias: string) => {
+    const trimmed = newAlias.trim();
+    if (!trimmed) return;
+
+    setDatabases(prev => prev.map(db => {
+      if (db.id === id) {
+        // If sandbox/memory, update name as well so exports/downloads use the new name
+        const isSandbox = db.syncMode === 'sandbox' || !db.fileHandle;
+        const updatedName = isSandbox ? trimmed : db.name;
+        const updated: DatabaseMetadata = {
+          ...db,
+          name: updatedName,
+          alias: trimmed
+        };
+
+        try {
+          const binary = exportDatabaseBinary(db.id);
+          persistDatabaseToStorage({
+            id: db.id,
+            name: updatedName,
+            alias: trimmed,
+            sizeBytes: binary.length,
+            buffer: binary,
+            syncMode: db.syncMode,
+            fileHandle: db.fileHandle,
+            isDirty: db.isDirty,
+            walDetected: db.walDetected,
+            lastModified: Date.now()
+          });
+        } catch (err) {
+          console.warn('Failed to persist renamed db:', err);
+        }
+        return updated;
+      }
+      return db;
+    }));
+    showToast('success', `Nama database berhasil diubah menjadi "${trimmed}".`);
+  };
+
+  const handleCloneDb = async (id: string) => {
+    const src = databases.find(d => d.id === id);
+    if (!src) return;
+
+    try {
+      const newId = 'db-' + Date.now();
+      const newName = `Copy of ${src.alias || src.name}`;
+      await cloneDatabase(src.id, newId);
+      const tables = inspectSchema(newId);
+      const binary = exportDatabaseBinary(newId);
+
+      const cloneMeta: DatabaseMetadata = {
+        id: newId,
+        name: newName,
+        alias: newName,
+        sizeBytes: binary.length,
+        tables,
+        isDirty: true,
+        syncMode: 'sandbox',
+        walDetected: src.walDetected,
+        companionFiles: { wal: false, shm: false },
+        lastModified: Date.now()
+      };
+
+      persistDatabaseToStorage({
+        id: newId,
+        name: newName,
+        alias: newName,
+        sizeBytes: binary.length,
+        buffer: binary,
+        syncMode: 'sandbox',
+        isDirty: true,
+        walDetected: src.walDetected,
+        lastModified: Date.now()
+      });
+
+      setDatabases(prev => [cloneMeta, ...prev]);
+      setActiveDbId(newId);
+      setSelectedTable(tables[0]?.name || null);
+      showToast('success', `Database berhasil dikloning sebagai "${newName}"!`);
+    } catch (err) {
+      console.error('Failed to clone database:', err);
+      showToast('error', 'Gagal mengkloning database.');
+    }
+  };
+
+  const handleExportSqlDump = (id: string) => {
+    const targetDb = databases.find(d => d.id === id);
+    if (!targetDb) return;
+
+    try {
+      const sqlDump = exportDatabaseSqlDump(id);
+      const dumpName = `${(targetDb.alias || targetDb.name).replace(/\.[^/.]+$/, '')}_dump.sql`;
+      triggerTextDownload(sqlDump, dumpName);
+      showToast('success', `File SQL Dump berhasil diekspor: ${dumpName}`);
+    } catch (err) {
+      console.error('Failed to export SQL Dump:', err);
+      showToast('error', 'Gagal mengekspor skrip SQL Dump.');
     }
   };
 
@@ -311,11 +620,30 @@ export const App: React.FC = () => {
     const updatedTables = inspectSchema(activeDbId);
     setDatabases(prev => prev.map(db => {
       if (db.id === activeDbId) {
-        return {
+        const updated = {
           ...db,
           isDirty: true,
           tables: updatedTables
         };
+        // Auto-persist modifications to IndexedDB so changes survive reload
+        try {
+          const binary = exportDatabaseBinary(db.id);
+          persistDatabaseToStorage({
+            id: db.id,
+            name: db.name,
+            alias: db.alias,
+            sizeBytes: binary.length,
+            buffer: binary,
+            syncMode: db.syncMode,
+            fileHandle: db.fileHandle,
+            isDirty: true,
+            walDetected: db.walDetected,
+            lastModified: Date.now()
+          });
+        } catch (err) {
+          console.warn('Failed to auto-persist modified db:', err);
+        }
+        return updated;
       }
       return db;
     }));
@@ -405,6 +733,10 @@ export const App: React.FC = () => {
           onCloseDb={handleCloseDb}
           onOpenNewDb={handleOpenFiles}
           onLoadDemo={loadDemoDatabase}
+          onSaveDb={handleSaveOrExport}
+          onRenameDb={handleRenameDb}
+          onCloneDb={handleCloneDb}
+          onExportSqlDump={handleExportSqlDump}
         />
 
         {/* Main Content Workspace */}
@@ -436,6 +768,7 @@ export const App: React.FC = () => {
               {activeView === 'grid' && (
                 currentTableSchema ? (
                   <DataGrid
+                    key={`${activeDb.id}-${currentTableSchema.name}`}
                     dbId={activeDb.id}
                     table={currentTableSchema}
                     onDataModified={handleDataModified}
@@ -503,7 +836,7 @@ export const App: React.FC = () => {
               {activeView === 'diagnostics' && (
                 <DiagnosticsView
                   dbId={activeDb.id}
-                  onRefreshSchema={handleRefreshSchema}
+                  onRefreshSchema={handleDataModified}
                 />
               )}
             </>
@@ -554,7 +887,7 @@ export const App: React.FC = () => {
           onClose={() => setIsImportModalOpen(false)}
           dbId={activeDb.id}
           existingTables={activeDb.tables}
-          onImportSuccess={handleRefreshSchema}
+          onImportSuccess={handleDataModified}
         />
       )}
 
@@ -562,6 +895,14 @@ export const App: React.FC = () => {
       <ShortcutsModal
         isOpen={isShortcutsModalOpen}
         onClose={() => setIsShortcutsModalOpen(false)}
+      />
+
+      {/* Native Mobile Bottom Navigation */}
+      <BottomNav
+        activeView={activeView}
+        onViewChange={setActiveView}
+        onToggleMobileSidebar={() => setIsMobileSidebarOpen(prev => !prev)}
+        activeDb={activeDb}
       />
     </div>
   );

@@ -620,3 +620,55 @@ export function getRelatedRecordSummary(
   return null;
 }
 
+/**
+ * Generate full SQL Dump (DDL + INSERT statements) for a database
+ */
+export function exportDatabaseSqlDump(id: string): string {
+  const db = activeDatabases.get(id);
+  if (!db) throw new Error(`Database ${id} not found`);
+
+  const lines: string[] = [
+    `-- SQLite Studio SQL Dump`,
+    `-- Generated: ${new Date().toISOString()}`,
+    `PRAGMA foreign_keys=OFF;`,
+    `BEGIN TRANSACTION;`,
+    ``
+  ];
+
+  const tables = inspectSchema(id);
+  for (const table of tables) {
+    if (table.ddl) {
+      lines.push(`${table.ddl};`);
+      lines.push('');
+    }
+
+    if (table.type === 'table') {
+      try {
+        const rowsRes = db.exec(`SELECT * FROM ${escapeIdentifier(table.name)};`);
+        if (rowsRes.length > 0 && rowsRes[0].values.length > 0) {
+          const cols = rowsRes[0].columns.map(c => escapeIdentifier(c)).join(', ');
+          for (const row of rowsRes[0].values) {
+            const formattedVals = row.map(val => formatSqlValue(val)).join(', ');
+            lines.push(`INSERT INTO ${escapeIdentifier(table.name)} (${cols}) VALUES (${formattedVals});`);
+          }
+          lines.push('');
+        }
+      } catch (err) {
+        console.warn(`Could not dump data for table ${table.name}`, err);
+      }
+    }
+  }
+
+  lines.push(`COMMIT;`);
+  return lines.join('\n');
+}
+
+/**
+ * Clone an active database into a new in-memory instance
+ */
+export async function cloneDatabase(sourceId: string, targetId: string): Promise<Database> {
+  const binary = exportDatabaseBinary(sourceId);
+  return loadDatabase(targetId, binary);
+}
+
+

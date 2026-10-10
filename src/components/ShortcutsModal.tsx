@@ -10,6 +10,7 @@ export const ShortcutsModal: React.FC<ShortcutsModalProps> = ({ isOpen, onClose 
   if (!isOpen) return null;
 
   const shortcuts = [
+    { key: 'Cmd/Ctrl + S', desc: 'Simpan perubahan database / Download .db' },
     { key: 'Cmd/Ctrl + Enter', desc: 'Jalankan query SQL di SQL Editor' },
     { key: 'Double Click Cell', desc: 'Edit langsung nilai cell di tabel data' },
     { key: 'Enter (saat edit)', desc: 'Simpan perubahan cell' },

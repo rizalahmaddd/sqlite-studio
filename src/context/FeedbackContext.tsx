@@ -1,4 +1,4 @@
-import React, { createContext, useState, useCallback, useRef, useEffect } from 'react';
+import React, { useState, useCallback, useRef, useEffect } from 'react';
 import { 
   CheckCircle2, 
   AlertCircle, 
@@ -7,40 +7,15 @@ import {
   X,
   HelpCircle
 } from 'lucide-react';
+import { 
+  FeedbackContext,
+  type ToastType, 
+  type ToastItem, 
+  type ConfirmDialogOptions, 
+  type AlertDialogOptions 
+} from './feedbackContextDef';
 
-// --- Types ---
-export type ToastType = 'success' | 'error' | 'warning' | 'info';
-
-export interface ToastItem {
-  id: string;
-  type: ToastType;
-  title?: string;
-  message: string;
-  duration?: number;
-}
-
-export interface ConfirmDialogOptions {
-  title: string;
-  message: string;
-  confirmText?: string;
-  cancelText?: string;
-  type?: 'danger' | 'warning' | 'info';
-}
-
-export interface AlertDialogOptions {
-  title: string;
-  message: string;
-  confirmText?: string;
-  type?: 'error' | 'warning' | 'info';
-}
-
-interface FeedbackContextType {
-  showToast: (type: ToastType, message: string, title?: string, duration?: number) => void;
-  confirm: (options: ConfirmDialogOptions) => Promise<boolean>;
-  alert: (options: AlertDialogOptions | string) => Promise<void>;
-}
-
-export const FeedbackContext = createContext<FeedbackContextType | null>(null);
+export type { ToastType, ToastItem, ConfirmDialogOptions, AlertDialogOptions };
 
 // --- Provider Component ---
 export const FeedbackProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {

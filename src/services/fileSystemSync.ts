@@ -74,6 +74,16 @@ export async function writeBackToDisk(handle: any, buffer: Uint8Array): Promise<
     if (!handle || typeof handle.createWritable !== 'function') {
       return false;
     }
+    // Check or request write permission (required for dropped handles or when permission expires)
+    if (typeof handle.queryPermission === 'function') {
+      const status = await handle.queryPermission({ mode: 'readwrite' });
+      if (status !== 'granted') {
+        const req = await handle.requestPermission({ mode: 'readwrite' });
+        if (req !== 'granted') {
+          return false;
+        }
+      }
+    }
     const writable = await handle.createWritable();
     await writable.write(buffer);
     await writable.close();
@@ -93,6 +103,21 @@ export function triggerFileDownload(buffer: Uint8Array, filename: string): void 
   const a = document.createElement('a');
   a.href = url;
   a.download = filename.endsWith('.db') || filename.endsWith('.sqlite') ? filename : `${filename}.db`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+/**
+ * Text file download (for SQL Dumps, CSV, etc.)
+ */
+export function triggerTextDownload(text: string, filename: string): void {
+  const blob = new Blob([text], { type: 'text/plain;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
