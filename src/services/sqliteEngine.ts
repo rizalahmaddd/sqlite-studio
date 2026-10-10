@@ -5,6 +5,25 @@ import type { TableSchema, ColumnInfo, ForeignKeyInfo, IndexInfo, QueryResult, S
 let SQLPromise: Promise<SqlJsStatic> | null = null;
 const activeDatabases = new Map<string, Database>();
 
+// COUNT(*) walks the whole table, which gets slow on big databases, so counts are
+// kept per table and only dropped when that table gains or loses rows.
+const rowCountCache = new Map<string, Map<string, number>>();
+
+// The update hook misses these: truncating DELETE, REPLACE conflicts, DDL and rollbacks.
+const COUNT_UNSAFE_SQL = /\b(delete|replace|drop|create|alter|rollback|attach|detach|vacuum)\b/i;
+
+function resetRowCounts(id: string): void {
+  rowCountCache.get(id)?.clear();
+}
+
+function trackRowCountChanges(id: string, db: Database): void {
+  db.updateHook((operation, _database, table) => {
+    if (operation !== 'update') {
+      rowCountCache.get(id)?.delete(table);
+    }
+  });
+}
+
 async function fetchValidWasmBytes(): Promise<ArrayBuffer> {
   const candidateUrls = [
     sqlWasmUrl,
@@ -121,6 +140,8 @@ export async function loadDatabase(id: string, buffer?: Uint8Array): Promise<Dat
     console.warn('Could not enable foreign keys:', err);
   }
 
+  rowCountCache.set(id, new Map());
+  trackRowCountChanges(id, db);
   activeDatabases.set(id, db);
   return db;
 }
@@ -134,13 +155,46 @@ export function closeDatabase(id: string): void {
   if (db) {
     db.close();
     activeDatabases.delete(id);
+    rowCountCache.delete(id);
   }
 }
 
 export function exportDatabaseBinary(id: string): Uint8Array {
   const db = activeDatabases.get(id);
   if (!db) throw new Error(`Database ${id} not found`);
-  return db.export();
+
+  // sql.js closes and reopens the connection on export, which silently resets
+  // connection state: foreign key enforcement goes back to OFF and hooks are lost.
+  let foreignKeysOn = true;
+  try {
+    foreignKeysOn = Number(db.exec('PRAGMA foreign_keys;')[0]?.values[0]?.[0]) !== 0;
+  } catch {
+    // keep default
+  }
+
+  const binary = db.export();
+
+  try {
+    db.exec(`PRAGMA foreign_keys = ${foreignKeysOn ? 'ON' : 'OFF'};`);
+  } catch (err) {
+    console.warn('Could not restore foreign key setting after export:', err);
+  }
+  trackRowCountChanges(id, db);
+  return binary;
+}
+
+/**
+ * Current database size in bytes, without exporting it
+ */
+export function getDatabaseSize(id: string): number {
+  const db = activeDatabases.get(id);
+  if (!db) return 0;
+  try {
+    const res = db.exec('SELECT page_count * page_size FROM pragma_page_count(), pragma_page_size();');
+    return Number(res[0]?.values[0]?.[0]) || 0;
+  } catch {
+    return 0;
+  }
 }
 
 /**
@@ -151,7 +205,12 @@ export function inspectSchema(id: string): TableSchema[] {
   if (!db) return [];
 
   const tables: TableSchema[] = [];
+  const cachedCounts = rowCountCache.get(id) ?? new Map<string, number>();
+  const freshCounts = new Map<string, number>();
   try {
+    // Triggers can change other tables in ways the update hook does not report
+    const hasTriggers = db.exec(`SELECT 1 FROM sqlite_master WHERE type = 'trigger' LIMIT 1;`).length > 0;
+
     const masterRes = db.exec(`
       SELECT name, type, sql 
       FROM sqlite_master 
@@ -221,14 +280,21 @@ export function inspectSchema(id: string): TableSchema[] {
         }
 
         // 4. Row Count
+        const canCacheCount = type === 'table' && !hasTriggers && !/^\s*CREATE\s+VIRTUAL|WITHOUT\s+ROWID/i.test(ddl);
         let rowCount = 0;
-        try {
-          const countRes = db.exec(`SELECT COUNT(*) FROM ${escapeIdentifier(name)};`);
-          if (countRes.length > 0 && countRes[0].values.length > 0) {
-            rowCount = Number(countRes[0].values[0][0]);
+        if (canCacheCount && cachedCounts.has(name)) {
+          rowCount = cachedCounts.get(name)!;
+          freshCounts.set(name, rowCount);
+        } else {
+          try {
+            const countRes = db.exec(`SELECT COUNT(*) FROM ${escapeIdentifier(name)};`);
+            if (countRes.length > 0 && countRes[0].values.length > 0) {
+              rowCount = Number(countRes[0].values[0][0]);
+              if (canCacheCount) freshCounts.set(name, rowCount);
+            }
+          } catch {
+            // View or virtual table count fallback
           }
-        } catch {
-          // View or virtual table count fallback
         }
 
         tables.push({
@@ -247,6 +313,9 @@ export function inspectSchema(id: string): TableSchema[] {
     console.error('Error inspecting schema:', err);
   }
 
+  if (rowCountCache.has(id)) {
+    rowCountCache.set(id, freshCounts);
+  }
   return tables;
 }
 
@@ -263,6 +332,10 @@ export function executeRawQuery(id: string, sqlQuery: string): QueryResult {
       query: sqlQuery,
       error: 'Database is not loaded or has been closed'
     };
+  }
+
+  if (COUNT_UNSAFE_SQL.test(sqlQuery)) {
+    resetRowCounts(id);
   }
 
   const startTime = performance.now();
@@ -361,6 +434,7 @@ export function executeInTransaction(id: string, statements: string[]): { succes
   const db = activeDatabases.get(id);
   if (!db) return { success: false, error: 'Database not available' };
 
+  resetRowCounts(id);
   try {
     db.exec('BEGIN TRANSACTION;');
     for (const stmt of statements) {
@@ -477,6 +551,7 @@ export function deleteRowsWithKeys(
     return { success: true };
   } catch (err: any) {
     try { db.exec('ROLLBACK;'); } catch {}
+    resetRowCounts(id);
     return { success: false, error: err.message || String(err) };
   }
 }

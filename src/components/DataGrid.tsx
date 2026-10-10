@@ -100,9 +100,13 @@ export const DataGrid: React.FC<DataGridProps> = ({
         whereClause = `WHERE ${conditions.join(' OR ')}`;
       }
 
-      const countRes = executeRawQuery(dbId, `SELECT COUNT(*) FROM ${escapeIdentifier(table.name)} ${whereClause};`);
-      if (countRes.values.length > 0) {
-        setTotalRows(Number(countRes.values[0][0]));
+      if (whereClause) {
+        const countRes = executeRawQuery(dbId, `SELECT COUNT(*) FROM ${escapeIdentifier(table.name)} ${whereClause};`);
+        if (countRes.values.length > 0) {
+          setTotalRows(Number(countRes.values[0][0]));
+        }
+      } else {
+        setTotalRows(table.rowCount);
       }
 
       // Order Clause
@@ -127,7 +131,7 @@ export const DataGrid: React.FC<DataGridProps> = ({
     } finally {
       setLoading(false);
     }
-  }, [dbId, table.name, table.columns, table.primaryKeys, searchQuery, sortColumn, sortOrder, page, pageSize, hasNoExplicitPk]);
+  }, [dbId, table.name, table.columns, table.primaryKeys, table.rowCount, searchQuery, sortColumn, sortOrder, page, pageSize, hasNoExplicitPk]);
 
   useEffect(() => {
     // oxlint-disable-next-line react/set-state-in-effect
