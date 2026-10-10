@@ -1,0 +1,49 @@
+{
+  "name": "sqlite-studio",
+  "version": "1.0.0",
+  "description": "100% Client-Side Local-First SQLite Database Manager powered by WebAssembly (WASM). Direct Disk Sync, Spreadsheet Data Grid, Visual ERD, and SQL Editor.",
+  "author": "Rizal Ahmad <https://github.com/rizalahmaddd>",
+  "license": "MIT",
+  "homepage": "https://sqlite.solusikoding.com",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/rizalahmaddd/sqlite-studio.git"
+  },
+  "keywords": [
+    "sqlite",
+    "sqlite-studio",
+    "sqlite-wasm",
+    "webassembly",
+    "database-manager",
+    "local-first",
+    "file-system-access-api",
+    "react",
+    "typescript",
+    "data-grid",
+    "erd",
+    "sql-editor"
+  ],
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "lint": "oxlint",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "lucide-react": "^1.55.0",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "sql.js": "^1.14.2"
+  },
+  "devDependencies": {
+    "@types/node": "^24.13.3",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.7",
+    "@types/sql.js": "^1.4.11",
+    "@vitejs/plugin-react": "^6.1.1",
+    "oxlint": "^1.81.0",
+    "typescript": "~6.0.2",
+    "vite": "^8.3.0"
+  }
+}
