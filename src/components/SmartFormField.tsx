@@ -20,6 +20,7 @@ import {
 } from 'lucide-react';
 import type { ColumnInfo, ForeignKeyInfo } from '../types/database';
 import { getRelatedTableRecords, getDistinctColumnValues } from '../services/sqliteEngine';
+import { useFeedback } from '../context/useFeedback';
 
 interface SmartFormFieldProps {
   dbId: string;
@@ -38,6 +39,7 @@ export const SmartFormField: React.FC<SmartFormFieldProps> = ({
   value,
   onChange
 }) => {
+  const { showToast } = useFeedback();
   // 1. Column Type & Semantic Analysis
   const isAutoIncrement = column.pk && column.type.toUpperCase().includes('INT');
   
@@ -597,8 +599,9 @@ export const SmartFormField: React.FC<SmartFormFieldProps> = ({
         if (!value) return;
         const parsed = typeof value === 'object' ? value : JSON.parse(value);
         onChange(JSON.stringify(parsed, null, 2));
+        showToast('success', 'Format JSON berhasil dirapikan.');
       } catch {
-        alert('Format JSON tidak valid!');
+        showToast('warning', 'Format JSON tidak valid!');
       }
     };
 

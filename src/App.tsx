@@ -30,8 +30,10 @@ import {
 } from './services/fileSystemSync';
 import { createSampleEcommerceDb } from './services/sampleData';
 import { Database, FolderOpen, Sparkles, Upload, TableProperties, Terminal } from 'lucide-react';
+import { useFeedback } from './context/useFeedback';
 
 export const App: React.FC = () => {
+  const { showToast, confirm } = useFeedback();
   const [databases, setDatabases] = useState<DatabaseMetadata[]>([]);
   const [activeDbId, setActiveDbId] = useState<string | null>(null);
   const [selectedTable, setSelectedTable] = useState<string | null>(null);
@@ -110,7 +112,7 @@ export const App: React.FC = () => {
 
           const validation = validateSqliteHeader(buffer);
           if (!validation.valid) {
-            alert(`File "${file.name}" tidak dapat dimuat: ${validation.reason}`);
+            showToast('error', `File "${file.name}" tidak dapat dimuat: ${validation.reason}`);
             continue;
           }
 
@@ -143,7 +145,7 @@ export const App: React.FC = () => {
           }
         } catch (err) {
           console.error('Error dropping file:', err);
-          alert(`Gagal membuka file "${file.name}".`);
+          showToast('error', `Gagal membuka file "${file.name}".`);
         }
       }
     };
@@ -157,7 +159,7 @@ export const App: React.FC = () => {
       window.removeEventListener('dragleave', handleDragLeave);
       window.removeEventListener('drop', handleDrop);
     };
-  }, []);
+  }, [showToast]);
 
   // Warn on tab close if there are unsaved changes
   useEffect(() => {
@@ -197,7 +199,7 @@ export const App: React.FC = () => {
       // Validate SQLite Header
       const validation = validateSqliteHeader(picked.buffer);
       if (!validation.valid) {
-        alert(`File "${picked.file.name}" tidak dapat dimuat: ${validation.reason}`);
+        showToast('error', `File "${picked.file.name}" tidak dapat dimuat: ${validation.reason}`);
         return;
       }
 
@@ -231,7 +233,7 @@ export const App: React.FC = () => {
       }
     } catch (err) {
       console.error('Failed to open SQLite database:', err);
-      alert('Gagal membuka file database SQLite.');
+      showToast('error', 'Gagal membuka file database SQLite.');
     }
   };
 
@@ -245,19 +247,21 @@ export const App: React.FC = () => {
         const success = await writeBackToDisk(activeDb.fileHandle, binary);
         if (success) {
           setDatabases(prev => prev.map(db => db.id === activeDb.id ? { ...db, isDirty: false, sizeBytes: binary.length } : db));
-          alert(`Perubahan berhasil disimpan langsung ke file "${activeDb.name}" di komputer Anda!`);
+          showToast('success', `Perubahan berhasil disimpan langsung ke file "${activeDb.name}" di komputer Anda!`);
         } else {
           // Fallback to download
           triggerFileDownload(binary, activeDb.name);
           setDatabases(prev => prev.map(db => db.id === activeDb.id ? { ...db, isDirty: false } : db));
+          showToast('info', `File database berhasil didownload: ${activeDb.name}`);
         }
       } else {
         triggerFileDownload(binary, activeDb.name);
         setDatabases(prev => prev.map(db => db.id === activeDb.id ? { ...db, isDirty: false } : db));
+        showToast('info', `File database berhasil didownload: ${activeDb.name}`);
       }
     } catch (err) {
       console.error('Failed to save or export database:', err);
-      alert('Gagal menyimpan database.');
+      showToast('error', 'Gagal menyimpan database.');
     }
   };
 
@@ -274,10 +278,17 @@ export const App: React.FC = () => {
     setActiveView('grid');
   };
 
-  const handleCloseDb = (id: string) => {
+  const handleCloseDb = async (id: string) => {
     const dbToClose = databases.find(d => d.id === id);
     if (dbToClose && dbToClose.isDirty) {
-      if (!window.confirm(`Database "${dbToClose.name}" memiliki perubahan yang belum disimpan. Tetap tutup?`)) {
+      const ok = await confirm({
+        title: 'Tutup Database',
+        message: `Database "${dbToClose.name}" memiliki perubahan yang belum disimpan. Tetap ingin menutup database ini?`,
+        confirmText: 'Tetap Tutup',
+        cancelText: 'Batal',
+        type: 'warning'
+      });
+      if (!ok) {
         return;
       }
     }

@@ -924,6 +924,29 @@ input[type="time"]::-webkit-calendar-picker-indicator:hover {
   }
 }
 
+@keyframes toastSlideIn {
+  from {
+    transform: translateX(30px) translateY(-10px) scale(0.95);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0) translateY(0) scale(1);
+    opacity: 1;
+  }
+}
+
+@keyframes scaleIn {
+  from {
+    transform: scale(0.92);
+    opacity: 0;
+  }
+  to {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+
 /* ==========================================================================
    Mobile & Tablet Screen Optimizations (< 768px)
    Drawer Navigation | Horizontal Touch Tabs | Sheet Modals | Touch Targets

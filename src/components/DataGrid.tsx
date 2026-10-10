@@ -28,6 +28,7 @@ import {
 } from '../services/sqliteEngine';
 import { exportToCsv, exportToJson } from '../services/fileSystemSync';
 import { SmartFormField } from './SmartFormField';
+import { useFeedback } from '../context/useFeedback';
 
 interface DataGridProps {
   dbId: string;
@@ -44,6 +45,7 @@ export const DataGrid: React.FC<DataGridProps> = ({
   onOpenDetailDrawer,
   onJumpToTable
 }) => {
+  const { showToast, confirm } = useFeedback();
   const [data, setData] = useState<{ columns: string[]; values: any[][] }>({ columns: [], values: [] });
   const [loading, setLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -185,15 +187,22 @@ export const DataGrid: React.FC<DataGridProps> = ({
       setEditingCell(null);
       onDataModified();
     } else {
-      alert(`Gagal mengupdate cell: ${res.error}`);
+      showToast('error', `Gagal mengupdate cell: ${res.error}`);
     }
   };
 
   // Batch Delete
-  const handleDeleteSelected = () => {
+  const handleDeleteSelected = async () => {
     if (selectedRowIndices.size === 0 || isView) return;
     const count = selectedRowIndices.size;
-    if (!window.confirm(`Yakin ingin menghapus ${count} baris terpilih dari tabel "${table.name}"?`)) {
+    const ok = await confirm({
+      title: 'Hapus Baris Terpilih',
+      message: `Yakin ingin menghapus ${count} baris terpilih dari tabel "${table.name}"? Data yang dihapus tidak dapat dipulihkan.`,
+      confirmText: `Hapus ${count} Baris`,
+      cancelText: 'Batal',
+      type: 'danger'
+    });
+    if (!ok) {
       return;
     }
 
@@ -208,6 +217,7 @@ export const DataGrid: React.FC<DataGridProps> = ({
     const res = deleteRowsWithKeys(dbId, table.name, rowsKeysToDelete);
     if (res.success) {
       setSelectedRowIndices(new Set());
+      showToast('success', `${count} baris berhasil dihapus dari "${table.name}".`);
       if (data.values.length === count && page > 1) {
         setPage(prev => Math.max(1, prev - 1));
       } else {
@@ -215,7 +225,7 @@ export const DataGrid: React.FC<DataGridProps> = ({
       }
       onDataModified();
     } else {
-      alert(`Gagal menghapus baris: ${res.error}`);
+      showToast('error', `Gagal menghapus baris: ${res.error}`);
     }
   };
 
@@ -260,8 +270,9 @@ export const DataGrid: React.FC<DataGridProps> = ({
       setNewRowValues({});
       loadTableData();
       onDataModified();
+      showToast('success', `Baris baru berhasil ditambahkan ke tabel "${table.name}".`);
     } else {
-      alert(`Gagal menambah baris baru: ${res.error}`);
+      showToast('error', `Gagal menambah baris baru: ${res.error}`);
     }
   };
 

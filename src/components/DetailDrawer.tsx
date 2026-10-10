@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 import type { ColumnInfo } from '../types/database';
 import { updateCellValueWithKeys } from '../services/sqliteEngine';
+import { useFeedback } from '../context/useFeedback';
 
 interface DetailDrawerProps {
   isOpen: boolean;
@@ -58,6 +59,7 @@ export const DetailDrawer: React.FC<DetailDrawerProps> = ({
   whereKeys,
   onSaved
 }) => {
+  const { showToast } = useFeedback();
   const [value, setValue] = useState<string>(() => parseDetailInitialValue(initialValue).text);
   const [blobBuffer, setBlobBuffer] = useState<Uint8Array | null>(() => parseDetailInitialValue(initialValue).blob);
   const [jsonError, setJsonError] = useState<string | null>(null);
@@ -157,9 +159,10 @@ export const DetailDrawer: React.FC<DetailDrawerProps> = ({
 
       const res = updateCellValueWithKeys(dbId, tableName, whereKeys, column.name, bytes);
       if (res.success) {
+        showToast('success', 'File BLOB berhasil disimpan.');
         onSaved();
       } else {
-        alert(`Gagal menyimpan file BLOB: ${res.error}`);
+        showToast('error', `Gagal menyimpan file BLOB: ${res.error}`);
       }
     };
     reader.readAsArrayBuffer(file);
@@ -169,9 +172,10 @@ export const DetailDrawer: React.FC<DetailDrawerProps> = ({
     setBlobBuffer(null);
     const res = updateCellValueWithKeys(dbId, tableName, whereKeys, column.name, null);
     if (res.success) {
+      showToast('success', 'Data BLOB berhasil dikosongkan.');
       onSaved();
     } else {
-      alert(`Gagal mengosongkan BLOB: ${res.error}`);
+      showToast('error', `Gagal mengosongkan BLOB: ${res.error}`);
     }
   };
 
@@ -188,10 +192,11 @@ export const DetailDrawer: React.FC<DetailDrawerProps> = ({
 
     const res = updateCellValueWithKeys(dbId, tableName, whereKeys, column.name, finalValue);
     if (res.success) {
+      showToast('success', 'Perubahan berhasil disimpan.');
       onSaved();
       onClose();
     } else {
-      alert(`Gagal menyimpan: ${res.error}`);
+      showToast('error', `Gagal menyimpan: ${res.error}`);
     }
   };
 
